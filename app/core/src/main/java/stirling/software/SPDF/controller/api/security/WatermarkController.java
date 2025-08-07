@@ -8,11 +8,14 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
 
 import javax.imageio.ImageIO;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.font.PDFont;
@@ -22,6 +25,10 @@ import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationMarkup;
+import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
+import org.apache.pdfbox.pdmodel.interactive.form.PDField;
 import org.apache.pdfbox.util.Matrix;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.ResponseEntity;
@@ -40,8 +47,10 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 
 import stirling.software.SPDF.model.api.security.AddWatermarkRequest;
+import stirling.software.SPDF.model.api.security.RemoveWatermarkRequest;
 import stirling.software.common.service.CustomPDFDocumentFactory;
 import stirling.software.common.util.PdfUtils;
+import stirling.software.common.util.WatermarkRemover;
 import stirling.software.common.util.WebResponseUtils;
 
 @RestController
@@ -323,5 +332,72 @@ public class WatermarkController {
                 contentStream.restoreGraphicsState();
             }
         }
+    }
+
+    @PostMapping(consumes = "multipart/form-data", value = "/remove-watermark")
+    @Operation(
+            summary = "Remove watermark from a PDF file",
+            description =
+                    "This endpoint removes a watermark from a given PDF file based on the"
+                            + " specified watermark text. Input:PDF Output:PDF Type:SISO")
+    public ResponseEntity<byte[]> removeWatermark(@ModelAttribute RemoveWatermarkRequest request)
+            throws Exception {
+        // Load the input PDF
+        MultipartFile pdfFile = request.getFileInput();
+        String pdfFileName = pdfFile.getOriginalFilename();
+        if (pdfFileName != null && (pdfFileName.contains("..") || pdfFileName.startsWith("/"))) {
+            throw new SecurityException("Invalid file path in pdfFile");
+        }
+        String watermarkText = request.getWatermarkText();
+        PDDocument document = pdfDocumentFactory.load(pdfFile);
+
+        // Create a new PDF document for the output
+        PDDocument outputDocument = new PDDocument();
+
+        // Loop through the pages
+        int numPages = document.getNumberOfPages();
+
+        for (int i = 0; i < numPages; i++) {
+            PDPage page = document.getPage(i);
+
+            // Process the content stream to remove the watermark text
+            WatermarkRemover editor = new WatermarkRemover(watermarkText) {};
+            editor.processPage(page);
+            editor.processPage(page);
+
+            // Add the page to the output document
+            outputDocument.addPage(page);
+        }
+
+        for (PDPage page : outputDocument.getPages()) {
+            List<PDAnnotation> annotations = page.getAnnotations();
+            List<PDAnnotation> annotationsToRemove = new ArrayList<>();
+            for (PDAnnotation annotation : annotations) {
+                if (annotation instanceof PDAnnotationMarkup markup) {
+                    String contents = markup.getContents();
+                    if (contents != null && contents.contains(watermarkText)) {
+                        annotationsToRemove.add(markup);
+                    }
+                }
+            }
+            annotations.removeAll(annotationsToRemove);
+        }
+
+        PDDocumentCatalog catalog = outputDocument.getDocumentCatalog();
+        PDAcroForm acroForm = catalog.getAcroForm();
+        if (acroForm != null) {
+            List<PDField> fields = acroForm.getFields();
+            for (PDField field : fields) {
+                String fieldValue = field.getValueAsString();
+                if (fieldValue.contains(watermarkText)) {
+                    field.setValue(fieldValue.replace(watermarkText, ""));
+                }
+            }
+        }
+        return WebResponseUtils.pdfDocToWebResponse(
+                outputDocument,
+                Filenames.toSimpleFileName(pdfFile.getOriginalFilename())
+                                .replaceFirst("[.][^.]+$", "")
+                        + "_watermark_removed.pdf");
     }
 }

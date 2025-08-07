@@ -52,6 +52,13 @@ public class SecurityWebController {
         return "security/add-watermark";
     }
 
+    @GetMapping("/remove-watermark")
+    @Hidden
+    public String removeWatermarkForm(Model model) {
+        model.addAttribute("currentPage", "remove-watermark");
+        return "security/remove-watermark";
+    }
+
     @GetMapping("/cert-sign")
     @Hidden
     public String certSignForm(Model model) {
