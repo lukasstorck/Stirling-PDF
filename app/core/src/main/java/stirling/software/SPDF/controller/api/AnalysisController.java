@@ -20,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 
 import stirling.software.common.model.api.PDFFile;
 import stirling.software.common.service.CustomPDFDocumentFactory;
+import stirling.software.common.util.OperatorInspector;
 
 @RestController
 @RequestMapping("/api/v1/analysis")
@@ -198,6 +199,27 @@ public class AnalysisController {
             }
 
             return securityInfo;
+        }
+    }
+
+    @PostMapping(value = "/operator-info", consumes = "multipart/form-data")
+    @Operation(
+            summary = "Get operator information",
+            description = "Returns operator details. Input:PDF Output:JSON Type:SISO")
+    public Map<String, Object> getOperatorInfo(@ModelAttribute PDFFile file) throws IOException {
+        try (PDDocument document = pdfDocumentFactory.load(file.getFileInput())) {
+            Map<String, Object> operatorInfo = new HashMap<>();
+
+            int pageIndex = 0;
+            for (PDPage page : document.getPages()) {
+                pageIndex++;
+                OperatorInspector inspector = new OperatorInspector(document);
+                inspector.processPage(page);
+                // inspector.captureAnnotations(page.getAnnotations());
+                operatorInfo.put("Page " + pageIndex, inspector.getElements());
+            }
+
+            return operatorInfo;
         }
     }
 }
